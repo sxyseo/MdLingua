@@ -47,7 +47,7 @@ def translate_directory_with_progress(
     source_lang: str = "auto", 
     target_lang: str = "en",
     progress_callback: Optional[Callable[[int, int], None]] = None
-) -> bool:
+) -> tuple[bool, int, int]:
     """
     翻译整个目录下的Markdown/MDX文件，支持进度回调
     
@@ -63,14 +63,14 @@ def translate_directory_with_progress(
         progress_callback: 进度回调函数，接收(当前文件数, 总文件数)作为参数
         
     Returns:
-        是否成功完成翻译
+        (是否成功完成翻译, 成功文件数, 失败文件数)的元组
     """
     source_path = Path(source_dir)
     target_path = Path(target_dir)
     
     if not source_path.exists():
         logger.error(f"源文件夹不存在: {source_dir}")
-        return False
+        return False, 0, 0
     
     # 确保目标目录存在
     os.makedirs(target_path, exist_ok=True)
@@ -105,6 +105,9 @@ def translate_directory_with_progress(
         progress_callback(0, total_files)
     
     # 使用线程池并行处理文件
+    success_count = 0
+    failure_count = 0
+    
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         futures = [
             executor.submit(process_file, src, tgt, provider, model, delay, source_lang, target_lang) 
@@ -115,8 +118,14 @@ def translate_directory_with_progress(
         completed = 0
         for future in futures:
             try:
-                future.result()  # 等待任务完成
+                result = future.result()  # 等待任务完成
                 completed += 1
+                
+                # 统计成功和失败的文件数
+                if result:
+                    success_count += 1
+                else:
+                    failure_count += 1
                 
                 # 更新进度条和日志
                 if completed % 1 == 0 or completed == total_files:  # 每处理一个文件就更新进度
@@ -129,12 +138,16 @@ def translate_directory_with_progress(
                         
             except Exception as e:
                 logger.error(f"任务执行失败: {str(e)}")
+                failure_count += 1
+                completed += 1
     
     # 生成翻译报告
     report = {
         "总文件数": total_files,
         "Markdown文件数": markdown_files,
         "MDX文件数": mdx_files,
+        "成功翻译文件数": success_count,
+        "失败翻译文件数": failure_count,
         "完成时间": time.strftime('%Y-%m-%d %H:%M:%S'),
         "提供商": provider,
         "模型": model or "默认",
@@ -157,9 +170,10 @@ def translate_directory_with_progress(
     
     logger.info(f"翻译完成，结果保存在 {target_dir}")
     logger.info(f"翻译报告保存在 {report_path}")
+    logger.info(f"成功: {success_count}个文件, 失败: {failure_count}个文件")
     
     # 最终通知100%进度
     if progress_callback:
         progress_callback(total_files, total_files)
         
-    return True 
+    return True, success_count, failure_count 

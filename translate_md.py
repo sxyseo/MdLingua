@@ -347,7 +347,7 @@ def translate_content(content: str, provider: str, model: Optional[str] = None,
         return f"[TRANSLATION ERROR: {str(e)}]\n\n{content}"
 
 def process_file(source_file: str, target_file: str, provider: str, model: Optional[str] = None, 
-                delay: int = 3, source_lang: str = "auto", target_lang: str = "en") -> None:
+                delay: int = 3, source_lang: str = "auto", target_lang: str = "en") -> bool:
     """
     处理单个文件的翻译
     
@@ -359,6 +359,9 @@ def process_file(source_file: str, target_file: str, provider: str, model: Optio
         delay: 翻译后的延迟时间(秒)
         source_lang: 源语言代码
         target_lang: 目标语言代码
+        
+    Returns:
+        是否成功翻译
     """
     try:
         # 确保目标文件夹存在
@@ -368,7 +371,7 @@ def process_file(source_file: str, target_file: str, provider: str, model: Optio
         if not is_markdown_file(source_file):
             shutil.copy2(source_file, target_file)
             logger.info(f"复制文件: {source_file} -> {target_file}")
-            return
+            return True
         
         # 是否为MDX文件
         is_mdx = source_file.endswith('.mdx')
@@ -388,7 +391,7 @@ def process_file(source_file: str, target_file: str, provider: str, model: Optio
         # 检查翻译是否成功，判断错误标记
         if translated_content.startswith("[TRANSLATION ERROR:"):
             logger.error(f"翻译失败，不保存文件: {target_file}")
-            return
+            return False
             
         # 写入目标文件
         with open(target_file, 'w', encoding='utf-8') as f:
@@ -398,9 +401,11 @@ def process_file(source_file: str, target_file: str, provider: str, model: Optio
         
         # 添加延迟，避免API速率限制
         time.sleep(delay)
+        return True
     
     except Exception as e:
         logger.error(f"处理文件 {source_file} 时出错: {str(e)}")
+        return False
 
 def collect_files(directory: str) -> List[str]:
     """
