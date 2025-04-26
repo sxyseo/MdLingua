@@ -41,17 +41,21 @@ import re
 from typing import Dict, Optional, List, Tuple
 
 try:
-    # 尝试导入LLM API工具
-    sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-    from tools.llm_api import query_llm, get_token_tracker
+    # 尝试导入LLM API工具（从当前目录）
+    from llm_api import query_llm, get_token_tracker
 except ImportError:
-    # 如果导入失败，我们将定义一个简单的函数来模拟LLM API调用
-    def query_llm(prompt, provider="anthropic", model=None, image_path=None):
-        print(f"[DEBUG] 发送到 {provider} 的提示词: {prompt[:100]}...")
-        return f"Error: LLM API 工具未找到，无法翻译。请确保 tools/llm_api.py 存在。"
-    
-    def get_token_tracker():
-        return None
+    try:
+        # 尝试从tools目录导入（兼容旧版本）
+        sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        from tools.llm_api import query_llm, get_token_tracker
+    except ImportError:
+        # 如果导入失败，我们将定义一个简单的函数来模拟LLM API调用
+        def query_llm(prompt, provider="anthropic", model=None, image_path=None):
+            print(f"[DEBUG] 发送到 {provider} 的提示词: {prompt[:100]}...")
+            return f"Error: LLM API 工具未找到，无法翻译。请确保 llm_api.py 存在于当前目录或 tools/llm_api.py 存在。"
+        
+        def get_token_tracker():
+            return None
 
 # 配置日志
 logging.basicConfig(
@@ -381,6 +385,11 @@ def process_file(source_file: str, target_file: str, provider: str, model: Optio
         logger.info(f"翻译{file_type}文件: {source_file} ({source_lang_name} -> {target_lang_name})")
         translated_content = translate_content(content, provider, model, is_mdx, source_lang, target_lang)
         
+        # 检查翻译是否成功，判断错误标记
+        if translated_content.startswith("[TRANSLATION ERROR:"):
+            logger.error(f"翻译失败，不保存文件: {target_file}")
+            return
+            
         # 写入目标文件
         with open(target_file, 'w', encoding='utf-8') as f:
             f.write(translated_content)

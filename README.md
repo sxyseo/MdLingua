@@ -27,7 +27,7 @@
 最简单的使用方式是启动图形界面：
 
 ```bash
-python translate_gui.py
+python translate_gui_tk.py
 ```
 
 GUI界面提供以下功能：
@@ -125,7 +125,7 @@ python translate_md.py --file ./docs/guide.md --target ./en/docs --provider open
 python translate_md.py --source ./en/docs --target ./docs --provider azure --batch 3 --delay 5 --source-lang en --target-lang zh
 
 # 使用 Google Gemini 翻译单个文件（英译中）
-python translate_md.py --file ./en/content/intro.md --target ./content --provider gemini --model gemini-pro --source-lang en --target-lang zh
+python translate_md.py --file ./en/content/intro.md --target ./content --provider gemini --model gemini-2.0-flash --source-lang en --target-lang zh
 
 # 使用 Windows 批处理脚本翻译目录（中译英）
 translate.bat docs en\docs openai gpt-4o 3 5 zh en
@@ -178,8 +178,8 @@ translate.bat --file docs\intro.mdx zh\docs siliconflow deepseek-ai/DeepSeek-R1 
 - 根据您的 Azure 部署设置（默认：`gpt-4o-ms`）
 
 ### Google Gemini
-- `gemini-pro`（默认）
-- `gemini-pro-vision`（支持图像）
+- `gemini-2.0-flash`（默认）
+- `gemini-2.0-flash-vision`（支持图像）
 - `gemini-2.0-flash-exp`
 - `gemini-1.5-flash`
 

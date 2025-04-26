@@ -17,6 +17,7 @@ import logging
 import mimetypes
 import base64
 import time
+import httpx
 from typing import Optional, Dict, Any, List, Union, NamedTuple
 from pathlib import Path
 
@@ -165,10 +166,16 @@ DEFAULT_MODELS = {
     "anthropic": "claude-3-5-sonnet-20241022",
     "azure": AZURE_OPENAI_MODEL_DEPLOYMENT,
     "deepseek": "deepseek-chat",
-    "gemini": "gemini-pro",
+    "gemini": "gemini-2.0-flash",
     "local": "Qwen/Qwen2.5-32B-Instruct-AWQ",
     "siliconflow": "mixtral-8x7b"
 }
+
+# 创建一个httpx客户端，用于处理代理
+http_client = httpx.Client(
+    timeout=60.0,
+    limits=httpx.Limits(max_keepalive_connections=5, max_connections=10)
+)
 
 def encode_image_file(image_path: str) -> tuple[str, str]:
     """
@@ -206,7 +213,7 @@ def create_llm_client(provider="openai"):
             api_key = OPENAI_API_KEY
             if not api_key:
                 raise ValueError("环境变量中未找到OPENAI_API_KEY")
-            return OpenAI(api_key=api_key)
+            return OpenAI(api_key=api_key, http_client=http_client)
         except ImportError:
             logger.error("请安装OpenAI包: pip install openai")
             return None
@@ -221,7 +228,8 @@ def create_llm_client(provider="openai"):
             return AzureOpenAI(
                 api_key=api_key,
                 api_version="2024-08-01-preview",
-                azure_endpoint=AZURE_ENDPOINT
+                azure_endpoint=AZURE_ENDPOINT,
+                http_client=http_client
             )
         except ImportError:
             logger.error("请安装OpenAI包: pip install openai")
@@ -237,6 +245,7 @@ def create_llm_client(provider="openai"):
             return OpenAI(
                 api_key=api_key,
                 base_url="https://api.deepseek.com/v1",
+                http_client=http_client
             )
         except ImportError:
             logger.error("请安装OpenAI包: pip install openai")
@@ -251,7 +260,8 @@ def create_llm_client(provider="openai"):
                 raise ValueError("环境变量中未找到SILICONFLOW_API_KEY")
             return OpenAI(
                 api_key=api_key,
-                base_url=SILICONFLOW_API_URL
+                base_url=SILICONFLOW_API_URL,
+                http_client=http_client
             )
         except ImportError:
             logger.error("请安装OpenAI包: pip install openai")
@@ -288,7 +298,8 @@ def create_llm_client(provider="openai"):
             
             return OpenAI(
                 base_url=LOCAL_LLM_URL,
-                api_key="not-needed"
+                api_key="not-needed",
+                http_client=http_client
             )
         except ImportError:
             logger.error("请安装OpenAI包: pip install openai")
@@ -300,358 +311,436 @@ def create_llm_client(provider="openai"):
 
 def simulate_translation(prompt: str) -> str:
     """
-    模拟翻译，仅用于测试目的
+    模拟翻译功能，用于测试或演示
     
     Args:
-        prompt: 包含要翻译内容的提示词
+        prompt: 翻译提示词
         
     Returns:
         模拟的翻译结果
     """
-    # 简单的中英文对照
-    translations = {
-        "快速入门": "Quick Start",
-        "几分钟内开始使用 AutoDev": "Get started with AutoDev in minutes",
-        "安装与设置": "Installation and Setup",
-        "JetBrains 插件市场": "JetBrains Plugin Marketplace",
-        "自定义仓库": "Custom Repository",
-        "GitHub 发布版本": "GitHub Releases",
-        "配置": "Configuration",
-        "默认 LLM": "Default LLM",
-        "基础配置": "Basic Configuration",
-        "高级配置": "Advanced Configuration",
-        "附加模型": "Additional Models",
+    logger.info("正在使用模拟翻译功能...")
+    
+    # 将提示词分割成行
+    lines = prompt.strip().split("\n")
+    
+    # 找到原始内容的起始和结束
+    start_index = -1
+    end_index = -1
+    
+    # 识别翻译方向
+    source_lang = "中文"
+    target_lang = "英文"
+    for i, line in enumerate(lines):
+        if "翻译专家" in line:
+            if "中文到英文" in line:
+                source_lang = "中文"
+                target_lang = "英文"
+            elif "英文到中文" in line:
+                source_lang = "英文"
+                target_lang = "中文"
+        
+        if line.strip().endswith("文档：") or "文档:" in line:
+            start_index = i + 1
+        elif "翻译：" in line:
+            end_index = i
+            break
+    
+    # 如果找不到明确的分界线，尝试从中间分割
+    if start_index == -1 or end_index == -1 or start_index >= end_index:
+        middle = len(lines) // 2
+        start_index = middle // 2
+        end_index = middle + middle // 2
+    
+    # 提取原始内容
+    original_content = "\n".join(lines[start_index:end_index]).strip()
+    
+    # 根据翻译方向执行模拟翻译
+    if source_lang == "中文" and target_lang == "英文":
+        return simulate_zh_to_en(original_content)
+    elif source_lang == "英文" and target_lang == "中文":
+        return simulate_en_to_zh(original_content)
+    else:
+        # 默认行为，添加标记
+        return f"[模拟翻译] {original_content}"
+
+def simulate_zh_to_en(content: str) -> str:
+    """模拟中文到英文的翻译"""
+    # 字典映射常见中文词汇/短语到英文
+    zh_to_en_dict = {
+        "标题": "Title",
+        "简介": "Introduction",
+        "目录": "Table of Contents",
+        "章节": "Chapter",
+        "部分": "Section",
+        "小节": "Subsection",
+        "段落": "Paragraph",
+        "示例": "Example",
         "注意": "Note",
-        "此版本适用于": "This version is compatible with",
-        "及更新版本": "and newer versions",
-        "前往": "Go to",
-        "设置": "Settings",
-        "插件": "Plugins",
-        "插件市场": "Plugin Marketplace",
-        "管理插件仓库": "Manage Plugin Repositories",
-        "添加以下 URL": "Add the following URL",
-        "从": "From",
-        "下载适合的版本": "download the appropriate version",
-        "适用于": "for",
-        "在 JetBrains IDE 中从磁盘安装插件": "Install the plugin from disk in JetBrains IDE",
-        "安装后": "After installation",
-        "中配置插件": "configure the plugin in",
-        "支持的提供商": "Supported providers",
-        "打开 AutoDev 配置": "open AutoDev configuration",
-        "配置": "Configure",
-        "服务器地址": "server address",
-        "例如": "For example",
-        "输入您的": "Enter your",
-        "密钥": "key",
-        "使用": "Use",
-        "设置": "set",
-        "自定义响应格式": "custom response format",
-        "自定义请求格式": "custom request format",
-        "有关更详细的配置选项": "For more detailed configuration options",
-        "请参见": "see",
-        "可用的模型类型": "Available model types",
-        "用于推理和规划": "for reasoning and planning",
-        "推荐": "Recommended",
-        "用于代码补全": "for code completion",
-        "用于修复补丁生成": "for patch generation",
-        "通用占位符": "general placeholder",
-        "尚未就绪": "not ready yet",
-        "用于执行操作": "for action execution",
-        "用于嵌入函数": "for embedding functions",
-        "配置字段": "Configuration fields",
-        "包含端点路径的": "containing the endpoint path",
-        "认证信息": "authentication information",
-        "目前仅支持": "currently only supports",
-        "令牌": "token",
-        "API 请求的 JSON 结构": "JSON structure for API requests",
-        "用于从响应中提取内容的": "for extracting content from responses",
-        "模型类型": "model type",
-        "见上面列表": "see list above",
-        # 添加更多通用翻译
-        "测试文档": "Test Document",
-        "这是一个用于测试翻译功能的文档": "This is a document for testing the translation function",
-        "基本功能": "Basic Features",
-        "列表项": "List Item",
-        "代码示例": "Code Example",
-        "你好，世界": "Hello, World",
-        "链接和图片": "Links and Images",
-        "示例链接": "Example Link",
-        "示例图片": "Example Image",
+        "警告": "Warning",
+        "提示": "Tip",
+        "总结": "Summary",
+        "结论": "Conclusion",
+        "参考文献": "References",
+        "附录": "Appendix",
+        "图表": "Figure",
         "表格": "Table",
-        "列": "Column",
-        "数据": "Data",
+        "代码": "Code",
+        "安装": "Installation",
+        "配置": "Configuration",
+        "使用方法": "Usage",
+        "快速开始": "Quick Start",
+        "高级用法": "Advanced Usage",
+        "入门指南": "Getting Started",
+        "教程": "Tutorial",
+        "开发者指南": "Developer Guide",
+        "常见问题": "FAQ",
+        "疑难解答": "Troubleshooting",
+        "如何使用": "How to Use",
+        "文件结构": "File Structure",
+        "项目结构": "Project Structure",
+        "主要功能": "Key Features",
+        "什么是": "What is",
+        "为什么": "Why",
+        "如何": "How to",
+        "什么时候": "When to",
+        "在哪里": "Where to",
+        "谁": "Who",
+        "详细说明": "Details",
+        "更多信息": "More Information",
+        "相关链接": "Related Links",
+        "依赖": "Dependencies",
+        "需求": "Requirements",
+        "支持": "Support",
+        "贡献": "Contributing",
+        "许可证": "License",
+        "版权": "Copyright",
+        "作者": "Author",
+        "联系方式": "Contact",
+        "感谢": "Acknowledgments",
+        "翻译": "Translation",
+        "工具": "Tool",
+        "应用": "Application",
+        "框架": "Framework",
+        "库": "Library",
+        "插件": "Plugin",
+        "扩展": "Extension",
+        "服务": "Service",
+        "命令行": "Command Line",
+        "界面": "Interface",
+        "源代码": "Source Code",
+        "构建": "Build",
+        "部署": "Deployment",
         "测试": "Test",
-        "文档首页": "Documentation Home",
-        "这是文档的首页，包含项目概述和导航": "This is the documentation home page, containing project overview and navigation",
-        "入门指南": "Getting Started Guide",
-        "本指南将帮助您快速上手我们的产品": "This guide will help you quickly get started with our product"
+        "调试": "Debug",
+        "执行": "Execute",
+        "运行": "Run",
+        "更新": "Update",
+        "升级": "Upgrade",
+        "下载": "Download",
+        "上传": "Upload",
+        "导入": "Import",
+        "导出": "Export",
+        "备份": "Backup",
+        "恢复": "Restore",
+        "开始": "Start",
+        "停止": "Stop",
+        "暂停": "Pause",
+        "继续": "Continue",
+        "重启": "Restart",
+        "输入": "Input",
+        "输出": "Output",
+        "参数": "Parameter",
+        "选项": "Option",
+        "默认值": "Default Value",
+        "可选": "Optional",
+        "必须": "Required",
+        "环境变量": "Environment Variable",
+        "配置文件": "Configuration File",
+        "日志": "Log",
+        "错误": "Error",
+        "警告": "Warning",
+        "信息": "Information",
+        "调试信息": "Debug Information",
+        "异常": "Exception",
+        "问题": "Issue",
+        "解决方案": "Solution",
+        "功能": "Feature",
+        "版本": "Version",
+        "发布": "Release",
+        "更新日志": "Changelog",
+        "路线图": "Roadmap",
+        "实现": "Implementation",
+        "设计": "Design",
+        "架构": "Architecture",
+        "模式": "Pattern",
+        "接口": "Interface",
+        "类": "Class",
+        "方法": "Method",
+        "函数": "Function",
+        "变量": "Variable",
+        "常量": "Constant",
+        "属性": "Property",
+        "对象": "Object",
+        "实例": "Instance",
+        "中文": "Chinese",
+        "英文": "English",
+        "翻译": "Translation",
+        # 增加常见短语和句型
+        "这是": "This is",
+        "这个": "This",
+        "一个": "a",
+        "在这里": "Here",
+        "可以": "can",
+        "我们": "We",
+        "你可以": "You can",
+        "请": "Please",
+        "使用": "use",
+        "查看": "view",
+        "编辑": "edit",
+        "创建": "create",
+        "删除": "delete",
+        "添加": "add",
+        "修改": "modify",
+        "文件": "file",
+        "文档": "document",
+        "页面": "page",
+        "网站": "website",
+        "程序": "program",
+        "软件": "software",
+        "系统": "system",
+        "语言": "language",
+        "学习": "learn",
+        "开发": "develop",
+        "设置": "settings",
+        "选择": "select",
+        "点击": "click",
+        "按钮": "button",
+        "链接": "link",
+        "菜单": "menu",
+        "选项": "option",
+        "首页": "home page",
+        "关于": "about",
+        "联系": "contact",
+        "帮助": "help",
+        "说明": "instructions",
+        "指南": "guide",
+        "示例": "example",
+        "示范": "demonstration",
+        "演示": "presentation",
+        "项目": "project",
+        "完成": "complete",
+        "结束": "end",
+        "开始": "start",
+        "继续": "continue",
+        "返回": "return",
+        "提交": "submit",
+        "保存": "save",
+        "加载": "load",
+        "导出": "export",
+        "导入": "import",
+        "上传": "upload",
+        "下载": "download",
+        "登录": "login",
+        "注册": "register",
+        "用户": "user",
+        "密码": "password",
+        "账户": "account",
+        "管理": "manage",
+        "控制": "control",
+        "设定": "set",
+        "自定义": "customize",
+        "预设": "preset",
+        "默认": "default",
+        "显示": "display",
+        "隐藏": "hide",
+        "打开": "open",
+        "关闭": "close",
+        "启用": "enable",
+        "禁用": "disable",
+        "支持": "support",
     }
     
-    # 从提示词中提取要翻译的内容
-    content_start = prompt.find("中文MDX文档：") if "中文MDX文档：" in prompt else prompt.find("中文Markdown文档：")
-    content_end = prompt.find("英文翻译：")
+    # 常用句式替换模式
+    sentence_patterns = [
+        (r'这是一个(.*?)的(.*?)', r'This is a \2 that \1'),
+        (r'这是(.*?)的(.*?)', r'This is the \2 of \1'),
+        (r'(.*?)是一个(.*?)', r'\1 is a \2'),
+        (r'(.*?)可以(.*?)', r'\1 can \2'),
+        (r'如何(.*?)\?', r'How to \1?'),
+        (r'为什么(.*?)\?', r'Why \1?'),
+        (r'什么是(.*?)\?', r'What is \1?'),
+        (r'(.*?)是什么\?', r'What is \1?'),
+        (r'(.*?)在哪里\?', r'Where is \1?'),
+        (r'如果你想(.*?)，你可以(.*?)', r'If you want to \1, you can \2'),
+        (r'请确保(.*?)', r'Please make sure to \1'),
+        (r'你需要(.*?)', r'You need to \1'),
+        (r'我们建议(.*?)', r'We recommend \1'),
+        (r'首先，(.*?)，然后(.*?)', r'First, \1, then \2'),
+    ]
     
-    if content_start == -1 or content_end == -1:
-        # 如果找不到标准分隔符，尝试其他可能的格式
-        content_start = prompt.find("中文文档：")
-        content_end = prompt.find("英文翻译：")
-        
-        if content_start == -1 or content_end == -1:
-            logger.warning("无法从提示词中提取内容，尝试直接翻译整个提示词")
-            content = prompt
-        else:
-            content = prompt[content_start + len("中文文档："):content_end].strip()
-    else:
-        content = prompt[content_start + len("中文MDX文档：" if "中文MDX文档：" in prompt else "中文Markdown文档："):content_end].strip()
+    # 分割内容为行处理
+    lines = content.split('\n')
+    translated_lines = []
     
-    # 处理front matter
-    if content.startswith("---"):
-        end_front_matter = content.find("---", 3)
-        if end_front_matter != -1:
-            front_matter = content[:end_front_matter + 3]
-            main_content = content[end_front_matter + 3:].strip()
-            
-            # 翻译front matter中的值
-            for cn, en in translations.items():
-                front_matter = front_matter.replace(f": {cn}", f": {en}")
-            
-            content = front_matter + "\n\n" + main_content
-    
-    # 简单替换关键词以模拟翻译
-    translated = content
-    for cn, en in translations.items():
-        # 避免替换JSX组件和属性名
-        if "<" in cn or ">" in cn or "=" in cn:
+    for line in lines:
+        # 检测特殊格式行（代码块、标题等）
+        if line.strip().startswith("```") or line.strip() == "":
+            # 保持代码块标记和空行不变
+            translated_lines.append(line)
             continue
             
-        # 替换文本内容，但保持JSX标签不变
-        parts = translated.split("<")
-        for i in range(len(parts)):
-            if i == 0:  # 第一个部分（标签前的内容）
-                parts[i] = parts[i].replace(cn, en)
-            else:  # 标签内的内容
-                tag_end = parts[i].find(">")
-                if tag_end != -1:
-                    # 分离标签和内容
-                    tag = parts[i][:tag_end + 1]
-                    content = parts[i][tag_end + 1:]
-                    
-                    # 只翻译内容部分
-                    content = content.replace(cn, en)
-                    
-                    # 重新组合
-                    parts[i] = tag + content
+        if line.strip().startswith("#"):
+            # 处理标题行
+            title_parts = line.split(' ', 1)
+            if len(title_parts) > 1:
+                heading = title_parts[0]
+                text = title_parts[1]
+                # 翻译标题文本
+                for zh, en in zh_to_en_dict.items():
+                    text = text.replace(zh, en)
+                translated_lines.append(f"{heading} {text}")
+            else:
+                translated_lines.append(line)
+            continue
         
-        translated = "<".join(parts)
+        # 普通文本行的处理
+        translated_line = line
+        
+        # 1. 先应用短语替换
+        for zh, en in zh_to_en_dict.items():
+            translated_line = translated_line.replace(zh, en)
+        
+        # 2. 如果没有发生任何变化，尝试应用句式模式
+        if translated_line == line and line.strip():
+            for pattern, replacement in sentence_patterns:
+                import re
+                if re.search(pattern, translated_line):
+                    translated_line = re.sub(pattern, replacement, translated_line)
+                    break
+        
+        # 3. 如果还是没有变化，添加英文标记
+        if translated_line == line and line.strip():
+            # 模拟完全翻译
+            words = line.split()
+            if len(words) > 0:
+                # 添加英文风格的随机翻译
+                translated_line = f"This is the English translation of the Chinese text: '{line}'"
+            
+        translated_lines.append(translated_line)
     
-    # 处理代码块
-    code_blocks = []
-    current_pos = 0
-    while True:
-        start = translated.find("```", current_pos)
-        if start == -1:
-            break
-        end = translated.find("```", start + 3)
-        if end == -1:
-            break
-        code_blocks.append((start, end + 3))
-        current_pos = end + 3
+    # 模拟API延迟
+    time.sleep(0.5)
     
-    # 恢复代码块内容
-    for start, end in reversed(code_blocks):
-        code_content = translated[start:end]
-        translated = translated[:start] + code_content + translated[end:]
+    return "\n".join(translated_lines)
+
+def simulate_en_to_zh(content: str) -> str:
+    """模拟英文到中文的翻译"""
+    # 与上面的字典相反
+    en_to_zh_dict = {}
+    zh_to_en_dict = {
+        "标题": "Title",
+        "简介": "Introduction",
+        "目录": "Table of Contents",
+        # ... 其他词汇映射
+    }
     
-    return translated
+    # 创建反向字典
+    for zh, en in zh_to_en_dict.items():
+        en_to_zh_dict[en] = zh
+    
+    # 分割内容为行处理
+    lines = content.split('\n')
+    translated_lines = []
+    
+    for line in lines:
+        # 检测特殊格式行（代码块、标题等）
+        if line.strip().startswith("```") or line.strip() == "":
+            # 保持代码块标记和空行不变
+            translated_lines.append(line)
+            continue
+            
+        if line.strip().startswith("#"):
+            # 处理标题行
+            title_parts = line.split(' ', 1)
+            if len(title_parts) > 1:
+                heading = title_parts[0]
+                text = title_parts[1]
+                # 翻译标题文本
+                for en, zh in en_to_zh_dict.items():
+                    text = text.replace(en, zh)
+                translated_lines.append(f"{heading} {text}")
+            else:
+                translated_lines.append(line)
+            continue
+                
+        # 普通文本行
+        translated_line = line
+        for en, zh in en_to_zh_dict.items():
+            translated_line = translated_line.replace(en, zh)
+        
+        # 如果没有任何词被翻译，添加一个中文前缀
+        if translated_line == line and line.strip():
+            translated_line = f"[中文] {line}"
+            
+        translated_lines.append(translated_line)
+    
+    # 模拟API延迟
+    time.sleep(0.5)
+    
+    return "\n".join(translated_lines)
 
 def query_llm(prompt: str, provider: str = "anthropic", model: Optional[str] = None, image_path: Optional[str] = None) -> str:
     """
-    查询LLM并获取响应
+    向指定的LLM提供商发送查询
     
     Args:
         prompt: 提示词
-        provider: LLM提供商，支持"openai"、"anthropic"、"azure"、"deepseek"、"gemini"、"local"、"siliconflow"
-        model: 要使用的模型名称（如果为None，将使用默认模型）
-        image_path: 可选的图片路径
+        provider: LLM提供商 (openai, anthropic, azure, deepseek, gemini, local, siliconflow)
+        model: 要使用的模型（如果为None，将使用提供商的默认模型）
+        image_path: 可选的图像文件路径（用于支持图像的模型）
         
     Returns:
-        LLM的响应文本
+        模型响应
     """
-    logger.info(f"正在使用 {provider} 处理请求")
-    
-    # 对于翻译任务，在测试模式下使用模拟翻译
-    if "将以下中文Markdown文档翻译成英文" in prompt and os.getenv("MOCK_TRANSLATION", "true").lower() == "true":
-        logger.info("使用模拟翻译（测试模式）")
-        time.sleep(1)  # 模拟API延迟
+    # 检查是否开启了模拟翻译模式
+    if os.getenv("MOCK_TRANSLATION", "").lower() == "true":
+        logger.info(f"模拟翻译模式已启用，不调用实际API")
         return simulate_translation(prompt)
     
-    # 尝试创建LLM客户端
-    client = create_llm_client(provider)
-    if client is None:
-        return f"错误: 无法创建 {provider} 客户端"
+    # 其余代码保持不变
+    start_time = time.time()
     
-    # 设置默认模型
+    # 如果未指定模型，使用默认模型
     if model is None:
         model = DEFAULT_MODELS.get(provider, "")
-        
+    
     try:
-        start_time = time.time()
-        
-        if provider in ["openai", "local", "deepseek", "azure", "siliconflow"]:
-            messages = [{"role": "user", "content": []}]
-            
-            # 添加文本内容
-            messages[0]["content"].append({
-                "type": "text",
-                "text": prompt
-            })
-            
-            # 如果提供了图片，将其添加到消息中
-            if image_path and os.path.exists(image_path):
-                encoded_image, mime_type = encode_image_file(image_path)
-                messages[0]["content"].append({
-                    "type": "image_url",
-                    "image_url": {"url": f"data:{mime_type};base64,{encoded_image}"}
-                })
-            
-            kwargs = {
-                "model": model,
-                "messages": messages,
-                "temperature": 0.3,  # 对于翻译，使用较低的温度
-            }
-            
-            # 为o1模型添加特定参数
-            if model == "o1":
-                kwargs["response_format"] = {"type": "text"}
-                kwargs["reasoning_effort"] = "low"
-                del kwargs["temperature"]
-            
-            response = client.chat.completions.create(**kwargs)
-            thinking_time = time.time() - start_time
-            
-            # 跟踪令牌使用
-            token_usage = TokenUsage(
-                prompt_tokens=response.usage.prompt_tokens,
-                completion_tokens=response.usage.completion_tokens,
-                total_tokens=response.usage.total_tokens,
-                reasoning_tokens=getattr(response.usage, 'reasoning_tokens', None) if model.lower().startswith("o") else None
-            )
-            
-            # 计算成本
-            cost = get_token_tracker().calculate_openai_cost(
-                token_usage.prompt_tokens,
-                token_usage.completion_tokens,
-                model
-            )
-            
-            # 跟踪请求
-            api_response = APIResponse(
-                content=response.choices[0].message.content,
-                token_usage=token_usage,
-                cost=cost,
-                thinking_time=thinking_time,
-                provider=provider,
-                model=model
-            )
-            get_token_tracker().track_request(api_response)
-            
-            return response.choices[0].message.content
-            
+        # 针对不同提供商的API调用
+        if provider == "openai":
+            response = query_openai(prompt, model, image_path)
         elif provider == "anthropic":
-            messages = [{"role": "user", "content": []}]
-            
-            # 添加文本内容
-            messages[0]["content"].append({
-                "type": "text",
-                "text": prompt
-            })
-            
-            # 如果提供了图片，将其添加到消息中
-            if image_path and os.path.exists(image_path):
-                encoded_image, mime_type = encode_image_file(image_path)
-                messages[0]["content"].append({
-                    "type": "image",
-                    "source": {
-                        "type": "base64",
-                        "media_type": mime_type,
-                        "data": encoded_image
-                    }
-                })
-            
-            response = client.messages.create(
-                model=model,
-                max_tokens=4000,
-                temperature=0.3,  # 对于翻译，使用较低的温度
-                messages=messages
-            )
-            thinking_time = time.time() - start_time
-            
-            # 跟踪令牌使用
-            token_usage = TokenUsage(
-                prompt_tokens=response.usage.input_tokens,
-                completion_tokens=response.usage.output_tokens,
-                total_tokens=response.usage.input_tokens + response.usage.output_tokens
-            )
-            
-            # 计算成本
-            cost = get_token_tracker().calculate_claude_cost(
-                token_usage.prompt_tokens,
-                token_usage.completion_tokens,
-                model
-            )
-            
-            # 跟踪请求
-            api_response = APIResponse(
-                content=response.content[0].text,
-                token_usage=token_usage,
-                cost=cost,
-                thinking_time=thinking_time,
-                provider=provider,
-                model=model
-            )
-            get_token_tracker().track_request(api_response)
-            
-            return response.content[0].text
-            
+            response = query_anthropic(prompt, model, image_path)
+        elif provider == "azure":
+            response = query_azure_openai(prompt, model, image_path)
+        elif provider == "deepseek":
+            response = query_deepseek(prompt, model)
         elif provider == "gemini":
-            gemini_model = client.GenerativeModel(model)
+            response = query_gemini(prompt, model, image_path)
+        elif provider == "local":
+            response = query_local_llm(prompt, model, image_path)
+        elif provider == "siliconflow":
+            response = query_siliconflow(prompt, model)
+        else:
+            raise ValueError(f"不支持的提供商: {provider}")
             
-            if image_path and os.path.exists(image_path):
-                # 对于Gemini，我们需要以不同方式处理图像
-                with open(image_path, "rb") as image_file:
-                    image_data = image_file.read()
-                response = gemini_model.generate_content([prompt, image_data])
-            else:
-                response = gemini_model.generate_content(prompt)
-                
-            thinking_time = time.time() - start_time
-            
-            # Gemini目前不提供令牌使用情况，所以我们使用估计值
-            estimated_prompt_tokens = len(prompt) // 4
-            estimated_completion_tokens = len(response.text) // 4
-            
-            token_usage = TokenUsage(
-                prompt_tokens=estimated_prompt_tokens,
-                completion_tokens=estimated_completion_tokens,
-                total_tokens=estimated_prompt_tokens + estimated_completion_tokens
-            )
-            
-            # 跟踪请求（没有实际成本计算）
-            api_response = APIResponse(
-                content=response.text,
-                token_usage=token_usage,
-                cost=0.0,  # 我们目前不计算Gemini的成本
-                thinking_time=thinking_time,
-                provider=provider,
-                model=model
-            )
-            get_token_tracker().track_request(api_response)
-            
-            return response.text
-            
+        thinking_time = time.time() - start_time
+        logger.debug(f"LLM思考时间: {thinking_time:.2f}秒")
+        
+        return response.content
     except Exception as e:
-        logger.error(f"查询LLM时出错: {str(e)}")
-        return f"错误: {provider} API调用失败 - {str(e)}"
+        logger.error(f"调用{provider} API失败: {str(e)}")
+        raise
 
 def parse_args():
     """解析命令行参数"""
@@ -671,7 +760,7 @@ def main():
     args = parse_args()
     
     # 设置环境变量启用模拟翻译（测试用）
-    os.environ["MOCK_TRANSLATION"] = "true"
+    # os.environ["MOCK_TRANSLATION"] = "true"
     
     # 调用LLM
     response = query_llm(args.prompt, provider=args.provider, model=args.model, image_path=args.image)
@@ -685,6 +774,594 @@ def main():
     print(f"总令牌: {token_tracker.total_tokens}", file=sys.stderr)
     print(f"估计成本: ${token_tracker.total_cost:.6f}", file=sys.stderr)
     print(f"请求数: {len(token_tracker.requests)}", file=sys.stderr)
+
+def query_siliconflow(prompt: str, model: str) -> APIResponse:
+    """
+    调用SiliconFlow API
+    
+    Args:
+        prompt: 提示词
+        model: 模型名称
+        
+    Returns:
+        API响应
+    """
+    logger.info(f"调用SiliconFlow API (模型: {model})...")
+    
+    try:
+        # 直接创建客户端，避免使用create_llm_client
+        from openai import OpenAI
+        import httpx
+        
+        api_key = SILICONFLOW_API_KEY
+        if not api_key:
+            raise ValueError("环境变量中未找到SILICONFLOW_API_KEY")
+        
+        # 使用httpx客户端，明确控制代理参数
+        http_client = httpx.Client(
+            timeout=60.0,
+            limits=httpx.Limits(max_keepalive_connections=5, max_connections=10)
+        )
+        
+        # 明确只传递OpenAI客户端支持的参数
+        client = OpenAI(
+            api_key=api_key,
+            base_url=SILICONFLOW_API_URL,
+            http_client=http_client
+        )
+        
+        start_time = time.time()
+        
+        # 创建聊天完成请求
+        response = client.chat.completions.create(
+            model=model,
+            messages=[
+                {"role": "system", "content": "你是一个有用的助手。"},
+                {"role": "user", "content": prompt}
+            ],
+            temperature=0.3,
+            max_tokens=4096,
+        )
+        
+        # 提取内容和令牌使用情况
+        content = response.choices[0].message.content
+        token_usage = TokenUsage(
+            prompt_tokens=response.usage.prompt_tokens,
+            completion_tokens=response.usage.completion_tokens,
+            total_tokens=response.usage.total_tokens
+        )
+        
+        # 估算成本（使用OpenAI的成本模型作为近似值）
+        cost = _token_tracker.calculate_openai_cost(
+            token_usage.prompt_tokens,
+            token_usage.completion_tokens,
+            "gpt-3.5-turbo"  # 估算成本时使用的参考模型
+        )
+        
+        thinking_time = time.time() - start_time
+        
+        # 创建并返回响应
+        api_response = APIResponse(
+            content=content,
+            token_usage=token_usage,
+            cost=cost,
+            thinking_time=thinking_time,
+            provider="siliconflow",
+            model=model
+        )
+        
+        # 记录令牌使用情况
+        _token_tracker.track_request(api_response)
+        
+        return api_response
+        
+    except Exception as e:
+        logger.error(f"SiliconFlow API调用失败: {str(e)}")
+        raise
+
+def query_openai(prompt: str, model: str, image_path: Optional[str] = None) -> APIResponse:
+    """
+    调用OpenAI API
+    
+    Args:
+        prompt: 提示词
+        model: 模型名称
+        image_path: 可选的图像文件路径
+        
+    Returns:
+        API响应
+    """
+    logger.info(f"调用OpenAI API (模型: {model})...")
+    
+    try:
+        # 使用create_llm_client创建客户端
+        client = create_llm_client("openai")
+        
+        if not client:
+            raise ValueError("无法创建OpenAI客户端，请检查API密钥")
+        
+        start_time = time.time()
+        
+        messages = []
+        
+        # 添加系统消息
+        messages.append({"role": "system", "content": "你是一个有用的助手。"})
+        
+        # 处理图像
+        if image_path and (model == "gpt-4o" or model == "gpt-4-vision-preview"):
+            logger.info(f"处理图像: {image_path}")
+            encoded_image, mime_type = encode_image_file(image_path)
+            content = [
+                {"type": "text", "text": prompt},
+                {
+                    "type": "image_url",
+                    "image_url": {
+                        "url": f"data:{mime_type};base64,{encoded_image}"
+                    }
+                }
+            ]
+            messages.append({"role": "user", "content": content})
+        else:
+            # 没有图像的普通请求
+            messages.append({"role": "user", "content": prompt})
+        
+        # 创建聊天完成请求
+        response = client.chat.completions.create(
+            model=model,
+            messages=messages,
+            temperature=0.3,
+            max_tokens=4096,
+        )
+        
+        # 提取内容和令牌使用情况
+        content = response.choices[0].message.content
+        token_usage = TokenUsage(
+            prompt_tokens=response.usage.prompt_tokens,
+            completion_tokens=response.usage.completion_tokens,
+            total_tokens=response.usage.total_tokens
+        )
+        
+        # 估算成本
+        cost = _token_tracker.calculate_openai_cost(
+            token_usage.prompt_tokens,
+            token_usage.completion_tokens,
+            model
+        )
+        
+        thinking_time = time.time() - start_time
+        
+        # 创建并返回响应
+        api_response = APIResponse(
+            content=content,
+            token_usage=token_usage,
+            cost=cost,
+            thinking_time=thinking_time,
+            provider="openai",
+            model=model
+        )
+        
+        # 记录令牌使用情况
+        _token_tracker.track_request(api_response)
+        
+        return api_response
+        
+    except Exception as e:
+        logger.error(f"OpenAI API调用失败: {str(e)}")
+        raise
+
+def query_anthropic(prompt: str, model: str, image_path: Optional[str] = None) -> APIResponse:
+    """
+    调用Anthropic API
+    
+    Args:
+        prompt: 提示词
+        model: 模型名称
+        image_path: 可选的图像文件路径
+        
+    Returns:
+        API响应
+    """
+    logger.info(f"调用Anthropic API (模型: {model})...")
+    client = create_llm_client("anthropic")
+    
+    if not client:
+        raise ValueError("无法创建Anthropic客户端，请检查API密钥")
+    
+    start_time = time.time()
+    
+    try:
+        # 创建消息
+        if image_path and "claude-3" in model:
+            logger.info(f"处理图像: {image_path}")
+            encoded_image, mime_type = encode_image_file(image_path)
+            
+            message = client.messages.create(
+                model=model,
+                max_tokens=4096,
+                temperature=0.3,
+                system="你是一个有用的助手。",
+                messages=[
+                    {
+                        "role": "user",
+                        "content": [
+                            {"type": "text", "text": prompt},
+                            {"type": "image", "source": {"type": "base64", "media_type": mime_type, "data": encoded_image}}
+                        ]
+                    }
+                ]
+            )
+        else:
+            # 没有图像的普通请求
+            message = client.messages.create(
+                model=model,
+                max_tokens=4096,
+                temperature=0.3,
+                system="你是一个有用的助手。",
+                messages=[
+                    {"role": "user", "content": prompt}
+                ]
+            )
+        
+        # 提取内容和令牌使用情况
+        content = message.content[0].text
+        token_usage = TokenUsage(
+            prompt_tokens=message.usage.input_tokens,
+            completion_tokens=message.usage.output_tokens,
+            total_tokens=message.usage.input_tokens + message.usage.output_tokens
+        )
+        
+        # 估算成本
+        cost = _token_tracker.calculate_claude_cost(
+            token_usage.prompt_tokens,
+            token_usage.completion_tokens,
+            model
+        )
+        
+        thinking_time = time.time() - start_time
+        
+        # 创建并返回响应
+        api_response = APIResponse(
+            content=content,
+            token_usage=token_usage,
+            cost=cost,
+            thinking_time=thinking_time,
+            provider="anthropic",
+            model=model
+        )
+        
+        # 记录令牌使用情况
+        _token_tracker.track_request(api_response)
+        
+        return api_response
+        
+    except Exception as e:
+        logger.error(f"Anthropic API调用失败: {str(e)}")
+        raise
+
+def query_azure_openai(prompt: str, model: str, image_path: Optional[str] = None) -> APIResponse:
+    """
+    调用Azure OpenAI API
+    
+    Args:
+        prompt: 提示词
+        model: 模型名称
+        image_path: 可选的图像文件路径
+        
+    Returns:
+        API响应
+    """
+    logger.info(f"调用Azure OpenAI API (模型部署: {model})...")
+    
+    try:
+        # 直接创建客户端，避免使用create_llm_client
+        from openai import AzureOpenAI
+        
+        api_key = AZURE_OPENAI_API_KEY
+        if not api_key:
+            raise ValueError("环境变量中未找到AZURE_OPENAI_API_KEY")
+            
+        # 明确只传递必要的参数
+        client = AzureOpenAI(
+            api_key=api_key,
+            api_version="2024-08-01-preview",
+            azure_endpoint=AZURE_ENDPOINT
+        )
+        
+        start_time = time.time()
+        
+        messages = []
+        
+        # 添加系统消息
+        messages.append({"role": "system", "content": "你是一个有用的助手。"})
+        
+        # 处理图像
+        if image_path and ("gpt-4" in model or "vision" in model):
+            logger.info(f"处理图像: {image_path}")
+            encoded_image, mime_type = encode_image_file(image_path)
+            content = [
+                {"type": "text", "text": prompt},
+                {
+                    "type": "image_url",
+                    "image_url": {
+                        "url": f"data:{mime_type};base64,{encoded_image}"
+                    }
+                }
+            ]
+            messages.append({"role": "user", "content": content})
+        else:
+            # 没有图像的普通请求
+            messages.append({"role": "user", "content": prompt})
+        
+        # 创建聊天完成请求
+        response = client.chat.completions.create(
+            model=model,  # 在Azure中，这是你的部署名称
+            messages=messages,
+            temperature=0.3,
+            max_tokens=4096,
+        )
+        
+        # 提取内容和令牌使用情况
+        content = response.choices[0].message.content
+        token_usage = TokenUsage(
+            prompt_tokens=response.usage.prompt_tokens,
+            completion_tokens=response.usage.completion_tokens,
+            total_tokens=response.usage.total_tokens
+        )
+        
+        # 估算成本（假设与OpenAI相同）
+        cost = _token_tracker.calculate_openai_cost(
+            token_usage.prompt_tokens,
+            token_usage.completion_tokens,
+            "gpt-4o"  # 使用gpt-4o的价格作为估算
+        )
+        
+        thinking_time = time.time() - start_time
+        
+        # 创建并返回响应
+        api_response = APIResponse(
+            content=content,
+            token_usage=token_usage,
+            cost=cost,
+            thinking_time=thinking_time,
+            provider="azure",
+            model=model
+        )
+        
+        # 记录令牌使用情况
+        _token_tracker.track_request(api_response)
+        
+        return api_response
+        
+    except Exception as e:
+        logger.error(f"Azure OpenAI API调用失败: {str(e)}")
+        raise
+
+def query_deepseek(prompt: str, model: str) -> APIResponse:
+    """
+    调用DeepSeek API
+    
+    Args:
+        prompt: 提示词
+        model: 模型名称
+        
+    Returns:
+        API响应
+    """
+    logger.info(f"调用DeepSeek API (模型: {model})...")
+    
+    try:
+        # 直接创建客户端，避免使用create_llm_client
+        from openai import OpenAI
+        import httpx
+        
+        api_key = DEEPSEEK_API_KEY
+        if not api_key:
+            raise ValueError("环境变量中未找到DEEPSEEK_API_KEY")
+            
+        # 使用httpx客户端，明确控制代理参数
+        http_client = httpx.Client(
+            timeout=60.0,
+            limits=httpx.Limits(max_keepalive_connections=5, max_connections=10)
+        )
+        
+        # 明确只传递必要的参数
+        client = OpenAI(
+            api_key=api_key,
+            base_url="https://api.deepseek.com/v1",
+            http_client=http_client
+        )
+        
+        start_time = time.time()
+        
+        # 创建聊天完成请求
+        response = client.chat.completions.create(
+            model=model,
+            messages=[
+                {"role": "system", "content": "你是一个有用的助手。"},
+                {"role": "user", "content": prompt}
+            ],
+            temperature=0.3,
+            max_tokens=4096,
+        )
+        
+        # 提取内容和令牌使用情况
+        content = response.choices[0].message.content
+        token_usage = TokenUsage(
+            prompt_tokens=response.usage.prompt_tokens,
+            completion_tokens=response.usage.completion_tokens,
+            total_tokens=response.usage.total_tokens
+        )
+        
+        # 估算成本（使用OpenAI的成本模型作为近似值）
+        cost = _token_tracker.calculate_openai_cost(
+            token_usage.prompt_tokens,
+            token_usage.completion_tokens,
+            "gpt-3.5-turbo"  # 估算成本时使用的参考模型
+        )
+        
+        thinking_time = time.time() - start_time
+        
+        # 创建并返回响应
+        api_response = APIResponse(
+            content=content,
+            token_usage=token_usage,
+            cost=cost,
+            thinking_time=thinking_time,
+            provider="deepseek",
+            model=model
+        )
+        
+        # 记录令牌使用情况
+        _token_tracker.track_request(api_response)
+        
+        return api_response
+        
+    except Exception as e:
+        logger.error(f"DeepSeek API调用失败: {str(e)}")
+        raise
+
+def query_gemini(prompt: str, model: str, image_path: Optional[str] = None) -> APIResponse:
+    """
+    调用Google Gemini API
+    
+    Args:
+        prompt: 提示词
+        model: 模型名称
+        image_path: 可选的图像文件路径
+        
+    Returns:
+        API响应
+    """
+    logger.info(f"调用Google Gemini API (模型: {model})...")
+    genai = create_llm_client("gemini")
+    
+    if not genai:
+        raise ValueError("无法创建Google Gemini客户端，请检查API密钥")
+    
+    start_time = time.time()
+    
+    try:
+        # 设置模型
+        model_obj = genai.GenerativeModel(model)
+        
+        # 处理请求
+        if image_path and "vision" in model:
+            logger.info(f"处理图像: {image_path}")
+            image = genai.upload_image(image_path)
+            response = model_obj.generate_content([prompt, image])
+        else:
+            response = model_obj.generate_content(prompt)
+        
+        # 提取内容
+        content = response.text
+        
+        # 由于Gemini API不直接提供令牌数，我们需要估计
+        # 简单估算：每个单词约1.3个令牌
+        prompt_words = len(prompt.split())
+        response_words = len(content.split())
+        prompt_tokens = int(prompt_words * 1.3)
+        completion_tokens = int(response_words * 1.3)
+        
+        token_usage = TokenUsage(
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+            total_tokens=prompt_tokens + completion_tokens
+        )
+        
+        # 估算成本（使用OpenAI的简化成本模型）
+        cost = 0.00002 * (prompt_tokens + completion_tokens)
+        
+        thinking_time = time.time() - start_time
+        
+        # 创建并返回响应
+        api_response = APIResponse(
+            content=content,
+            token_usage=token_usage,
+            cost=cost,
+            thinking_time=thinking_time,
+            provider="gemini",
+            model=model
+        )
+        
+        # 记录令牌使用情况
+        _token_tracker.track_request(api_response)
+        
+        return api_response
+        
+    except Exception as e:
+        logger.error(f"Google Gemini API调用失败: {str(e)}")
+        raise
+
+def query_local_llm(prompt: str, model: str, image_path: Optional[str] = None) -> APIResponse:
+    """
+    调用本地LLM
+    
+    Args:
+        prompt: 提示词
+        model: 模型名称
+        image_path: 可选的图像文件路径（本地LLM可能不支持）
+        
+    Returns:
+        API响应
+    """
+    logger.info(f"调用本地LLM (模型: {model})...")
+    
+    try:
+        # 使用create_llm_client创建客户端
+        client = create_llm_client("local")
+        
+        if not client:
+            raise ValueError("无法创建本地LLM客户端")
+        
+        start_time = time.time()
+        
+        # 创建聊天完成请求
+        response = client.chat.completions.create(
+            model=model,
+            messages=[
+                {"role": "system", "content": "你是一个有用的助手。"},
+                {"role": "user", "content": prompt}
+            ],
+            temperature=0.3,
+            max_tokens=4096,
+        )
+        
+        # 提取内容
+        content = response.choices[0].message.content
+        
+        # 为本地LLM创建模拟令牌使用情况
+        prompt_tokens = len(prompt.split()) * 2  # 粗略估计
+        completion_tokens = len(content.split()) * 2  # 粗略估计
+        
+        token_usage = TokenUsage(
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+            total_tokens=prompt_tokens + completion_tokens
+        )
+        
+        # 本地LLM没有成本
+        cost = 0.0
+        
+        thinking_time = time.time() - start_time
+        
+        # 创建并返回响应
+        api_response = APIResponse(
+            content=content,
+            token_usage=token_usage,
+            cost=cost,
+            thinking_time=thinking_time,
+            provider="local",
+            model=model
+        )
+        
+        # 记录令牌使用情况
+        _token_tracker.track_request(api_response)
+        
+        return api_response
+        
+    except Exception as e:
+        logger.error(f"本地LLM调用失败: {str(e)}")
+        raise
 
 if __name__ == "__main__":
     main() 
