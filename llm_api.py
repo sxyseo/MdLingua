@@ -134,7 +134,7 @@ def load_environment():
                 env_loaded = True
                 logger.info(f"从 {env_file} 加载了环境变量")
                 # 打印加载的键（出于安全考虑不打印值）
-                with open(env_path) as f:
+                with open(env_path, encoding='utf-8') as f:
                     keys = [line.split('=')[0].strip() for line in f if '=' in line and not line.startswith('#')]
                     logger.debug(f"从 {env_file} 加载的键: {keys}")
         
