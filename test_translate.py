@@ -90,7 +90,7 @@ def run_translation(source_dir, target_dir, provider="anthropic"):
         print(result.stdout)
         return True
     except subprocess.CalledProcessError as e:
-        print(f"翻译失败: {e}")
+        print(f"翻译失败: {str(e)}")
         print(f"标准输出: {e.stdout}")
         print(f"标准错误: {e.stderr}")
         return False
