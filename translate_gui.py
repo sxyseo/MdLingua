@@ -21,6 +21,31 @@ import threading
 import logging
 from pathlib import Path
 
+# 添加配置管理器
+try:
+    from config_manager import ConfigManager
+except ImportError:
+    # 定义一个简单的配置管理器替代类
+    class ConfigManager:
+        def __init__(self, config_file=None):
+            self.config = {}
+        def get(self, key, default=None):
+            return default
+        def set(self, key, value):
+            pass
+        def save_config(self):
+            pass
+        def get_recent_sources(self):
+            return []
+        def get_recent_targets(self):
+            return []
+        def add_recent_source(self, path):
+            pass
+        def add_recent_target(self, path):
+            pass
+        def get_api_key(self, provider):
+            return ""
+
 # 添加调试信息
 print("Python版本:", sys.version)
 print("当前工作目录:", os.getcwd())
@@ -31,7 +56,7 @@ try:
         QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, 
         QLabel, QPushButton, QProgressBar, QComboBox, QSpinBox,
         QTextEdit, QFileDialog, QMessageBox, QGroupBox, QFrame,
-        QSplitter, QStyle, QGridLayout
+        QSplitter, QStyle, QGridLayout, QMenu, QDialog
     )
     from PySide6.QtCore import Qt, QThread, Signal, QTimer, QUrl, QMimeData
     from PySide6.QtGui import QDragEnterEvent, QDropEvent, QFont, QIcon, QDesktopServices
@@ -69,6 +94,29 @@ logging.basicConfig(
     ]
 )
 logger = logging.getLogger("translate_gui")
+
+# 日志配置函数
+def configure_logging(log_level="INFO", auto_save_logs=True):
+    """配置日志系统"""
+    level = getattr(logging, log_level.upper(), logging.INFO)
+    
+    handlers = [logging.StreamHandler()]
+    if auto_save_logs:
+        handlers.append(logging.FileHandler("translate_gui.log"))
+    
+    # 移除所有已存在的处理器
+    for handler in logging.getLogger().handlers[:]:
+        logging.getLogger().removeHandler(handler)
+    
+    # 重新配置日志
+    logging.basicConfig(
+        level=level,
+        format='%(asctime)s - %(levelname)s - %(message)s',
+        datefmt='%Y-%m-%d %H:%M:%S',
+        handlers=handlers
+    )
+    
+    return logging.getLogger("translate_gui")
 
 # 支持的LLM提供商
 PROVIDERS = {
@@ -224,12 +272,15 @@ class TranslationWorker(QThread):
 class TranslateWidget(QWidget):
     """翻译应用程序的主界面"""
     
-    def __init__(self, parent=None):
+    def __init__(self, config_manager, parent=None):
         super().__init__(parent)
+        self.config_manager = config_manager
         self.source_path = None
         self.target_dir = None
         self.is_single_file = False
         self.translation_worker = TranslationWorker()
+        self.recent_sources_menu = None
+        self.recent_targets_menu = None
         
         # 连接信号
         self.translation_worker.progressUpdated.connect(self.update_progress)
@@ -239,6 +290,7 @@ class TranslateWidget(QWidget):
         
         self.setup_ui()
         self.setup_drop_support()
+        self.load_config()
         
     def setup_ui(self):
         """设置用户界面"""
@@ -275,7 +327,13 @@ class TranslateWidget(QWidget):
         self.source_dir_btn = QPushButton("选择文件夹")
         self.source_dir_btn.clicked.connect(self.browse_source_dir)
         
+        # 添加最近使用的源文件/文件夹按钮
+        self.recent_sources_btn = QPushButton("最近使用")
+        self.recent_sources_menu = QMenu(self)
+        self.recent_sources_btn.setMenu(self.recent_sources_menu)
+        
         layout.addWidget(self.source_label, 1)
+        layout.addWidget(self.recent_sources_btn)
         layout.addWidget(self.source_file_btn)
         layout.addWidget(self.source_dir_btn)
         
@@ -288,10 +346,16 @@ class TranslateWidget(QWidget):
         
         self.target_label = QLabel("拖放文件夹到这里，或点击浏览...")
         
+        # 添加最近使用的目标文件夹按钮
+        self.recent_targets_btn = QPushButton("最近使用")
+        self.recent_targets_menu = QMenu(self)
+        self.recent_targets_btn.setMenu(self.recent_targets_menu)
+        
         self.target_btn = QPushButton("浏览...")
         self.target_btn.clicked.connect(self.browse_target_dir)
         
         layout.addWidget(self.target_label, 1)
+        layout.addWidget(self.recent_targets_btn)
         layout.addWidget(self.target_btn)
         
         self.target_frame.setLayout(layout)
@@ -407,9 +471,14 @@ class TranslateWidget(QWidget):
         self.view_btn.clicked.connect(self.open_target_folder)
         self.view_btn.setEnabled(False)
         
+        # 添加设置按钮
+        self.settings_btn = QPushButton("设置")
+        self.settings_btn.clicked.connect(self.open_settings)
+        
         layout.addWidget(self.start_btn)
         layout.addWidget(self.cancel_btn)
         layout.addStretch(1)
+        layout.addWidget(self.settings_btn)
         layout.addWidget(self.view_btn)
         
         self.buttons_frame.setLayout(layout)
@@ -467,9 +536,7 @@ class TranslateWidget(QWidget):
         """浏览并选择目标目录"""
         dir_path = QFileDialog.getExistingDirectory(self, "选择翻译结果保存位置")
         if dir_path:
-            self.target_dir = dir_path
-            self.target_label.setText(dir_path)
-            self.log_message(f"设置目标文件夹: {dir_path}")
+            self.set_target_dir(dir_path)
             
     def set_source_file(self, file_path):
         """设置源文件"""
@@ -482,13 +549,16 @@ class TranslateWidget(QWidget):
         self.source_label.setText(file_path)
         self.log_message(f"设置源文件: {file_path}")
         
+        # 添加到最近使用的源文件
+        self.config_manager.add_recent_source(file_path)
+        self.update_recent_menus()
+        
         # 自动设置默认目标文件夹
         if not self.target_dir:
             parent_dir = os.path.dirname(file_path)
             lang_code = self.target_lang_combo.currentData()
             default_target = os.path.join(parent_dir, lang_code)
-            self.target_dir = default_target
-            self.target_label.setText(default_target)
+            self.set_target_dir(default_target)
             
     def set_source_dir(self, dir_path):
         """设置源目录"""
@@ -497,15 +567,28 @@ class TranslateWidget(QWidget):
         self.source_label.setText(dir_path)
         self.log_message(f"设置源文件夹: {dir_path}")
         
+        # 添加到最近使用的源文件夹
+        self.config_manager.add_recent_source(dir_path)
+        self.update_recent_menus()
+        
         # 自动设置默认目标文件夹
         if not self.target_dir:
             parent_dir = os.path.dirname(dir_path)
             dir_name = os.path.basename(dir_path)
             lang_code = self.target_lang_combo.currentData()
             default_target = os.path.join(parent_dir, f"{lang_code}_{dir_name}")
-            self.target_dir = default_target
-            self.target_label.setText(default_target)
-            
+            self.set_target_dir(default_target)
+    
+    def set_target_dir(self, dir_path):
+        """设置目标目录"""
+        self.target_dir = dir_path
+        self.target_label.setText(dir_path)
+        self.log_message(f"设置目标文件夹: {dir_path}")
+        
+        # 添加到最近使用的目标文件夹
+        self.config_manager.add_recent_target(dir_path)
+        self.update_recent_menus()
+    
     def update_model_options(self):
         """更新模型选项"""
         provider = self.provider_combo.currentData()
@@ -564,6 +647,14 @@ class TranslateWidget(QWidget):
         target_lang = self.target_lang_combo.currentData()
         batch_size = self.batch_spinbox.value()
         delay = self.delay_spinbox.value()
+        
+        # 保存当前设置到配置
+        self.config_manager.set("source_lang", source_lang)
+        self.config_manager.set("target_lang", target_lang)
+        self.config_manager.set("provider", provider)
+        self.config_manager.set("batch_size", batch_size)
+        self.config_manager.set("delay", delay)
+        self.config_manager.save_config()
         
         # 确保目标文件夹存在
         os.makedirs(self.target_dir, exist_ok=True)
@@ -629,11 +720,131 @@ class TranslateWidget(QWidget):
             self.start_btn.setEnabled(True)
             self.cancel_btn.setEnabled(False)
 
+    def load_config(self):
+        """从配置中加载设置"""
+        # 更新语言选择
+        source_lang = self.config_manager.get("source_lang", "auto")
+        target_lang = self.config_manager.get("target_lang", "en")
+        
+        # 设置语言下拉框
+        index = self.source_lang_combo.findData(source_lang)
+        if index >= 0:
+            self.source_lang_combo.setCurrentIndex(index)
+            
+        index = self.target_lang_combo.findData(target_lang)
+        if index >= 0:
+            self.target_lang_combo.setCurrentIndex(index)
+        
+        # 设置提供商和模型
+        provider = self.config_manager.get("provider", "anthropic")
+        index = self.provider_combo.findData(provider)
+        if index >= 0:
+            self.provider_combo.setCurrentIndex(index)
+            self.update_model_options()  # 更新模型下拉框
+        
+        # 设置批处理大小和延迟
+        self.batch_spinbox.setValue(self.config_manager.get("batch_size", 5))
+        self.delay_spinbox.setValue(self.config_manager.get("delay", 3))
+        
+        # 更新最近使用的源和目标
+        self.update_recent_menus()
+    
+    def update_recent_menus(self):
+        """更新最近使用的源和目标菜单"""
+        # 清空当前菜单
+        self.recent_sources_menu.clear()
+        self.recent_targets_menu.clear()
+        
+        # 获取最近使用列表
+        recent_sources = self.config_manager.get_recent_sources()
+        recent_targets = self.config_manager.get_recent_targets()
+        
+        if recent_sources:
+            for path in recent_sources:
+                action = self.recent_sources_menu.addAction(os.path.basename(path))
+                action.setData(path)
+                action.setToolTip(path)
+                
+                # 根据路径是文件还是文件夹设置不同的处理函数
+                if os.path.exists(path):
+                    if os.path.isfile(path):
+                        action.triggered.connect(lambda checked, p=path: self.set_source_file(p))
+                    else:
+                        action.triggered.connect(lambda checked, p=path: self.set_source_dir(p))
+        else:
+            action = self.recent_sources_menu.addAction("无最近记录")
+            action.setEnabled(False)
+            
+        if recent_targets:
+            for path in recent_targets:
+                action = self.recent_targets_menu.addAction(os.path.basename(path))
+                action.setData(path)
+                action.setToolTip(path)
+                action.triggered.connect(lambda checked, p=path: self.set_target_dir(p))
+        else:
+            action = self.recent_targets_menu.addAction("无最近记录")
+            action.setEnabled(False)
+            
+        # 添加清除历史记录选项
+        if recent_sources:
+            self.recent_sources_menu.addSeparator()
+            action = self.recent_sources_menu.addAction("清除历史记录")
+            action.triggered.connect(lambda: self.clear_recent_history("sources"))
+            
+        if recent_targets:
+            self.recent_targets_menu.addSeparator()
+            action = self.recent_targets_menu.addAction("清除历史记录")
+            action.triggered.connect(lambda: self.clear_recent_history("targets"))
+    
+    def clear_recent_history(self, history_type):
+        """清除历史记录"""
+        reply = QMessageBox.question(
+            self, 
+            "确认清除", 
+            f"确定要清除{'源文件/文件夹' if history_type == 'sources' else '目标文件夹'}的历史记录吗？",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No
+        )
+        
+        if reply == QMessageBox.Yes:
+            if history_type == "sources":
+                self.config_manager.set("recent_sources", [])
+            else:
+                self.config_manager.set("recent_targets", [])
+                
+            self.config_manager.save_config()
+            self.update_recent_menus()
+    
+    def open_settings(self):
+        """打开设置对话框"""
+        try:
+            from settings_dialog import SettingsDialog
+            dialog = SettingsDialog(self.config_manager, self)
+            if dialog.exec() == QDialog.Accepted:
+                # 设置已更改，重新加载
+                self.load_config()
+                # 更新日志级别
+                log_level = self.config_manager.get("log_level", "INFO")
+                auto_save_logs = self.config_manager.get("auto_save_logs", True)
+                global logger
+                logger = configure_logging(log_level, auto_save_logs)
+        except ImportError:
+            QMessageBox.warning(self, "错误", "无法加载设置对话框，请确保settings_dialog.py文件存在。")
+
 class TranslateApp(QMainWindow):
     """翻译应用程序的主窗口"""
     
     def __init__(self):
         super().__init__()
+        # 创建配置管理器
+        self.config_manager = ConfigManager()
+        
+        # 配置日志
+        log_level = self.config_manager.get("log_level", "INFO")
+        auto_save_logs = self.config_manager.get("auto_save_logs", True)
+        global logger
+        logger = configure_logging(log_level, auto_save_logs)
+        
         self.init_ui()
         
     def init_ui(self):
@@ -653,11 +864,31 @@ class TranslateApp(QMainWindow):
         else:
             print(f"图标文件不存在: {icon_path}")
         
-        self.central_widget = TranslateWidget(self)
+        # 传递配置管理器到翻译窗口
+        self.central_widget = TranslateWidget(self.config_manager, self)
         self.setCentralWidget(self.central_widget)
+        
+        # 应用外观设置
+        self.apply_appearance_settings()
         
         # 检查环境变量
         QTimer.singleShot(100, self.check_environment)
+    
+    def apply_appearance_settings(self):
+        """应用外观设置"""
+        # 应用字体大小
+        font_size = self.config_manager.get("appearance.font_size", 10)
+        font = self.font()
+        font.setPointSize(font_size)
+        self.setFont(font)
+        
+        # 应用主题 (这里只是示例，PySide6默认不支持主题切换，需要额外实现)
+        theme = self.config_manager.get("appearance.theme", "system")
+        if theme == "light":
+            self.setStyleSheet("")  # 可以设置浅色主题的样式表
+        elif theme == "dark":
+            self.setStyleSheet("")  # 可以设置深色主题的样式表
+        # system 主题使用系统默认
         
     def check_environment(self):
         """检查环境变量和依赖"""
